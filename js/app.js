@@ -54,7 +54,7 @@ async function boot(){
   yearFrom=META.map_range_default? META.map_range_default[0]:1975;
   yearTo  =META.map_range_default? META.map_range_default[1]:1985;
 
-  document.getElementById('disclaimer').innerHTML='<b>Важно про данные.</b> '+META.disclaimer;
+  document.getElementById('disclaimer').innerHTML='<b>О данных.</b> '+META.disclaimer;
 
   // preselect a couple of common names if present
   const pref=['Александр','Елена'].filter(n=>SLUG_BY_NAME[n]);

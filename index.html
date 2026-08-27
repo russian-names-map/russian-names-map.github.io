@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Имена России</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header>
+  <h1>Имена России</h1>
+  <p id="subtitle">Популярность имён по годам рождения и регионам — по данным из сети</p>
+</header>
+
+<div class="wrap">
+  <aside class="panel">
+    <h2>Имена</h2>
+    <div class="selected" id="selected"></div>
+    <input class="search" placeholder="Поиск имени…" id="search">
+    <div class="namelist" id="namelist"></div>
+    <div class="hint">Отметьте до 10 имён.</div>
+  </aside>
+
+  <main>
+    <div class="controls">
+      <div class="seg" id="mode">
+        <button data-m="trend" class="on">Динамика по годам</button>
+        <button data-m="map">Карта регионов</button>
+      </div>
+    </div>
+    <div class="metrics" id="metrics"></div>
+    <div class="panel" id="trendPanel"><h2>Число носителей по году рождения</h2><div id="trendBody"></div></div>
+    <div class="panel" id="mapPanel" style="display:none"><h2>Доля имени по регионам</h2><div id="mapBody"></div></div>
+    <div class="disclaimer" id="disclaimer"></div>
+  </main>
+</div>
+
+<div class="tip" id="tip"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

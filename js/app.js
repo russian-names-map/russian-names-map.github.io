@@ -262,21 +262,34 @@ function drawChoropleth(name, ramp){
     .on('mouseout',hideTip)
     .on('click',(e,f)=>selectRegion(f.id));
 
-  // markers for small regions (Москва, СПб, кавказские республики…)
-  const areas=GEO.features.map(f=>({f, a:path.area(f)}));
-  const maxA=Math.max(...areas.map(o=>o.a));
-  const SMALL=maxA*0.012;   // regions under ~1.2% of the largest get a marker
-  areas.filter(o=>o.a>0 && o.a<SMALL).forEach(o=>{
-    const iso=o.f.id, [cx,cy]=path.centroid(o.f);
-    if(!isFinite(cx)) return;
+  // callouts for Moscow & St. Petersburg only (too small to see/click otherwise)
+  const CALLOUT = {
+    'RU-MOW': { label:'Москва',        dx:-70, dy: 34 },
+    'RU-SPE': { label:'Санкт-Петербург', dx:-96, dy:-26 },
+  };
+  Object.entries(CALLOUT).forEach(([iso,cfg])=>{
+    const feat=GEO.features.find(f=>f.id===iso); if(!feat) return;
+    const [cx,cy]=path.centroid(feat); if(!isFinite(cx)) return;
     const v=share[iso];
-    svg.append('circle').attr('cx',cx).attr('cy',cy).attr('r',5)
-      .attr('fill', v==null? 'url(#hatch)' : fillFor(v))
-      .attr('stroke','#1a1a19').attr('stroke-width',0.8)
+    const lx=cx+cfg.dx, ly=cy+cfg.dy;
+    // leader line
+    svg.append('line').attr('x1',cx).attr('y1',cy).attr('x2',lx).attr('y2',ly)
+      .attr('stroke','#1a1a19').attr('stroke-width',0.7).attr('opacity',0.6);
+    // dot on the region
+    svg.append('circle').attr('cx',cx).attr('cy',cy).attr('r',4)
+      .attr('fill', v==null?'url(#hatch)':fillFor(v))
+      .attr('stroke','#1a1a19').attr('stroke-width',0.9)
       .style('cursor','pointer')
-      .on('mousemove',(e)=>showTip(e,tipText(iso)))
-      .on('mouseout',hideTip)
+      .on('mousemove',(e)=>showTip(e,tipText(iso))).on('mouseout',hideTip)
       .on('click',()=>selectRegion(iso));
+    // label with a small swatch
+    const g=svg.append('g').style('cursor','pointer')
+      .on('mousemove',(e)=>showTip(e,tipText(iso))).on('mouseout',hideTip)
+      .on('click',()=>selectRegion(iso));
+    g.append('rect').attr('x',lx-2).attr('y',ly-8).attr('width',10).attr('height',10).attr('rx',2)
+      .attr('fill', v==null?'url(#hatch)':fillFor(v)).attr('stroke','#1a1a19').attr('stroke-width',0.6);
+    g.append('text').attr('x',lx+12).attr('y',ly).attr('dy','0.32em')
+      .attr('font-size','11').attr('font-weight','600').attr('fill','#1a1a19').text(cfg.label);
   });
 }
 
@@ -310,7 +323,7 @@ function renderRegionTop(){
   const rangeTxt=yearFrom+(yearTo!==yearFrom?'–'+yearTo:'');
   if(!totals.length){ el.innerHTML=`<div class="rt-title">${ru}</div><div class="rt-hint">Недостаточно данных за ${rangeTxt}.</div>`; return; }
   const denom=totals.reduce((s,[,c])=>s+c,0);
-  const top=totals.slice(0,10);
+  const top=totals.slice(0,5);
   const rows=top.map(([n,c],i)=>{
     const pct=(100*c/denom).toFixed(1);
     const isSel=SLUG_BY_NAME[n]&&selected.includes(n);

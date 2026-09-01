@@ -13,8 +13,11 @@ let REGION_TOTALS = {};    // ISO -> {year: total}             — map denominat
 
 let selected = [];
 let mode = 'trend';
+let yscale = 'lin';          // 'lin' | 'log' for the trend chart
 let mapName = null;
 let yearFrom = 1975, yearTo = 1985;
+let selectedRegion = null;         // ISO of region clicked for the top-names panel
+const _regionCache = {};           // iso -> { name: {year:cnt} }
 
 const colorOf = n => PALETTE[selected.indexOf(n) % PALETTE.length];
 
@@ -54,7 +57,7 @@ async function boot(){
   yearFrom=META.map_range_default? META.map_range_default[0]:1975;
   yearTo  =META.map_range_default? META.map_range_default[1]:1985;
 
-  document.getElementById('disclaimer').innerHTML='<b>О данных.</b> '+META.disclaimer;
+  document.getElementById('disclaimer').innerHTML='<b>Важно про данные.</b> '+META.disclaimer;
 
   // preselect a couple of common names if present
   const pref=['Александр','Елена'].filter(n=>SLUG_BY_NAME[n]);
@@ -102,28 +105,72 @@ function renderMetrics(){
 }
 
 // ---------- trend chart ----------
+// Chart.js plugin: draw each series' name at the right end of its line
+const endLabelPlugin = {
+  id: 'endLabels',
+  afterDatasetsDraw(chart){
+    const {ctx} = chart;
+    ctx.save();
+    ctx.font = '600 12px -apple-system,Segoe UI,Roboto,sans-serif';
+    ctx.textBaseline = 'middle';
+    // collect last visible point per dataset, then nudge apart vertically
+    const labels = [];
+    chart.data.datasets.forEach((ds,i)=>{
+      const meta = chart.getDatasetMeta(i);
+      if(meta.hidden) return;
+      // find last point with a finite value
+      let pt=null;
+      for(let k=ds.data.length-1;k>=0;k--){
+        const v=ds.data[k];
+        if(v!=null && isFinite(v)){ pt=meta.data[k]; break; }
+      }
+      if(pt) labels.push({y:pt.y, x:pt.x, color:ds.borderColor, text:ds.label});
+    });
+    labels.sort((a,b)=>a.y-b.y);
+    const minGap=14;
+    for(let i=1;i<labels.length;i++){
+      if(labels[i].y - labels[i-1].y < minGap) labels[i].y = labels[i-1].y + minGap;
+    }
+    const area=chart.chartArea;
+    labels.forEach(l=>{
+      const x=Math.min(l.x+6, area.right+4);
+      ctx.fillStyle=l.color;
+      ctx.fillText(l.text, x, Math.max(area.top+6, Math.min(l.y, area.bottom-6)));
+    });
+    ctx.restore();
+  }
+};
+
 let chart;
 function renderTrend(){
   const body=document.getElementById('trendBody');
   if(!selected.length){ body.innerHTML='<div class="placeholder">Выберите одно или несколько имён слева.</div>'; return; }
   body.innerHTML='<div class="chartbox"><canvas id="chart" role="img" aria-label="Доля имён по годам рождения"></canvas></div>'+
-    '<div class="note">Доля — сколько процентов рождённых в этот год носят имя. Годы на краях диапазона с малым числом наблюдений менее надёжны.</div>';
+    '<div class="note">Доля — сколько процентов рождённых в этот год носят имя. Годы на краях диапазона с малым числом наблюдений менее надёжны.'+
+    (yscale==='log'?' Логарифмическая шкала: нулевые значения не отображаются.':'')+'</div>';
+  const isLog = yscale==='log';
   const ds=selected.map(n=>{ const d=nameData(n)||{years:{}};
     return { label:n,
-      data:YEARS.map(y=>{ const tot=YEAR_TOTALS[y]||0; return tot? 100*(d.years[y]||0)/tot : 0; }),
+      data:YEARS.map(y=>{ const tot=YEAR_TOTALS[y]||0; const v = tot? 100*(d.years[y]||0)/tot : 0;
+        return (isLog && v<=0) ? null : v; }),   // log can't show 0
       borderColor:colorOf(n), backgroundColor:colorOf(n),
-      tension:0, pointRadius:0, pointHoverRadius:4, borderWidth:2 }; });
+      tension:0, pointRadius:0, pointHoverRadius:4, borderWidth:2, spanGaps:false }; });
   if(chart) chart.destroy();
   chart=new Chart(document.getElementById('chart'),{ type:'line',
     data:{ labels:YEARS, datasets:ds },
     options:{ responsive:true, maintainAspectRatio:false,
+      layout:{ padding:{ right:70 } },      // room for line-end labels
       interaction:{ mode:'index', intersect:false },
       plugins:{ legend:{display:false},
         tooltip:{ callbacks:{
           title:items=>items[0].label+' г.р.',
-          label:ctx=>ctx.dataset.label+': '+ctx.parsed.y.toFixed(2)+'%'
+          label:ctx=>ctx.dataset.label+': '+(ctx.parsed.y==null?'—':ctx.parsed.y.toFixed(2)+'%')
         }}},
-      scales:{ x:{grid:{display:false}}, y:{beginAtZero:true, ticks:{callback:v=>v+'%'}} } } });
+      scales:{ x:{grid:{display:false}},
+        y: isLog
+          ? { type:'logarithmic', ticks:{callback:v=>v+'%'} }
+          : { beginAtZero:true, ticks:{callback:v=>v+'%'} } } },
+    plugins:[endLabelPlugin] });
 }
 
 // ---------- map (real D3 choropleth) ----------
@@ -146,22 +193,41 @@ function renderMap(){
       </div></div>
     <div class="maprow">
       <div id="map"></div>
-      <div><div class="scale">
+      <div>
+        <div class="scale">
         <div>Доля рождённых с именем <b style="color:${colorOf(mapName)}">${mapName}</b> в ${yearFrom}${yearTo!==yearFrom?'–'+yearTo:''}</div>
         <div class="bar" id="scalebar"></div>
         <div class="ends"><span>мало</span><span>много</span></div>
         <div style="display:flex;align-items:center;gap:7px;margin-top:10px">
           <span style="width:11px;height:11px;border-radius:3px;background:repeating-linear-gradient(45deg,#f0efec,#f0efec 3px,#e7e5df 3px,#e7e5df 6px)"></span>
           <span>мало данных</span></div>
-      </div></div>
+        </div>
+        <div id="regionTop" class="regiontop"></div>
+      </div>
     </div>`;
   const base=colorOf(mapName), ramp=[tint(base,.82),tint(base,.55),tint(base,.28),base];
   document.getElementById('scalebar').style.background=`linear-gradient(90deg,${ramp.join(',')})`;
   drawChoropleth(mapName, ramp);
+  renderRegionTop();
   body.querySelectorAll('.chip.pick').forEach(c=>c.onclick=async ()=>{ mapName=c.dataset.mn; if(!nameData(mapName)) await loadName(mapName); renderMap(); });
   const yf=document.getElementById('yFrom'), yt=document.getElementById('yTo');
   const upd=()=>{ yearFrom=Math.min(+yf.value,+yt.value)||META.year_min; yearTo=Math.max(+yf.value,+yt.value)||META.year_max; renderMap(); };
   yf.onchange=upd; yt.onchange=upd;
+}
+
+function computeShare(name){
+  // share + numerator per region over [yearFrom..yearTo]
+  const d=nameData(name)||{regions:{}};
+  const minCell=META.map_min_cell||30;
+  const share={}, count={};
+  GEO.features.forEach(f=>{
+    const iso=f.id, rt=REGION_TOTALS[iso]||{};
+    let num=0, den=0;
+    for(let y=yearFrom;y<=yearTo;y++){ den+=rt[y]||0; num+=(d.regions[iso]&&d.regions[iso][y])||0; }
+    share[iso] = (den>=minCell)? num/den : null;
+    count[iso] = num;
+  });
+  return {share, count};
 }
 
 function drawChoropleth(name, ramp){
@@ -177,36 +243,100 @@ function drawChoropleth(name, ramp){
   const proj=d3.geoAlbers().rotate([-105,0]).center([-10,60]).parallels([50,70]);
   const path=d3.geoPath(proj); proj.fitSize([W,H], GEO);
 
-  // compute share per region over [yearFrom..yearTo]
-  const d=nameData(name)||{regions:{}};
-  const minCell=META.map_min_cell||30;
-  const share={};       // iso -> share or null (too little data)
-  GEO.features.forEach(f=>{
-    const iso=f.id;
-    const rt=REGION_TOTALS[iso]||{};
-    let num=0, den=0;
-    for(let y=yearFrom;y<=yearTo;y++){
-      den += rt[y]||0;
-      num += (d.regions[iso] && d.regions[iso][y])||0;
-    }
-    share[iso] = (den>=minCell) ? num/den : null;
-  });
-  // color scale relative to max share in view (so differences are visible)
+  const {share,count}=computeShare(name);
   const vals=Object.values(share).filter(v=>v!=null);
   const maxShare=vals.length?Math.max(...vals):0;
   const norm=v=> maxShare>0? v/maxShare : 0;
+  const fillFor=v=> v==null? null : ramp[Math.min(3,Math.floor(norm(v)*3.999))];
+  const tipText=(iso)=>{ const v=share[iso], c=count[iso]||0;
+    const ru=REGION_NAMES[iso]||iso;
+    return ru+': '+(v==null?'мало данных':(v*100).toFixed(2)+'% ('+c.toLocaleString('ru')+' чел.)'); };
 
+  // region polygons
   svg.selectAll('path').data(GEO.features).join('path')
     .attr('d',path)
-    .attr('class',d=>{ const v=share[d.id]; return 'region'+(v==null?' nodata':''); })
-    .attr('fill',d=>{ const v=share[d.id]; if(v==null) return null; return ramp[Math.min(3,Math.floor(norm(v)*3.999))]; })
-    .on('mousemove',(e,f)=>{ const v=share[f.id];
-      const ruName=REGION_NAMES[f.id]||f.properties.name;
-      showTip(e, ruName+': '+(v==null?'мало данных':(v*100).toFixed(2)+'%')); })
-    .on('mouseout',hideTip);
+    .attr('class',d=>'region'+(share[d.id]==null?' nodata':''))
+    .attr('fill',d=>fillFor(share[d.id]))
+    .style('cursor','pointer')
+    .on('mousemove',(e,f)=>showTip(e,tipText(f.id)))
+    .on('mouseout',hideTip)
+    .on('click',(e,f)=>selectRegion(f.id));
+
+  // markers for small regions (Москва, СПб, кавказские республики…)
+  const areas=GEO.features.map(f=>({f, a:path.area(f)}));
+  const maxA=Math.max(...areas.map(o=>o.a));
+  const SMALL=maxA*0.012;   // regions under ~1.2% of the largest get a marker
+  areas.filter(o=>o.a>0 && o.a<SMALL).forEach(o=>{
+    const iso=o.f.id, [cx,cy]=path.centroid(o.f);
+    if(!isFinite(cx)) return;
+    const v=share[iso];
+    svg.append('circle').attr('cx',cx).attr('cy',cy).attr('r',5)
+      .attr('fill', v==null? 'url(#hatch)' : fillFor(v))
+      .attr('stroke','#1a1a19').attr('stroke-width',0.8)
+      .style('cursor','pointer')
+      .on('mousemove',(e)=>showTip(e,tipText(iso)))
+      .on('mouseout',hideTip)
+      .on('click',()=>selectRegion(iso));
+  });
 }
 
-// ---------- tooltip ----------
+// ---------- region top-names panel ----------
+async function loadRegion(iso){
+  if(_regionCache[iso]) return _regionCache[iso];
+  try{
+    const d=await fetch('data/regions/'+iso+'.json').then(r=>r.json());
+    _regionCache[iso]=d; return d;
+  }catch(e){ _regionCache[iso]={}; return {}; }
+}
+async function selectRegion(iso){
+  selectedRegion=iso;
+  await loadRegion(iso);
+  renderRegionTop();
+}
+function renderRegionTop(){
+  const el=document.getElementById('regionTop');
+  if(!el) return;
+  if(!selectedRegion){ el.innerHTML='<div class="rt-hint">Нажмите на регион, чтобы увидеть самые частые имена в нём за выбранный период.</div>'; return; }
+  const iso=selectedRegion, data=_regionCache[iso]||{};
+  // sum each name over [yearFrom..yearTo], accurate top for the range
+  const totals=[];
+  for(const n in data){
+    let s=0; const ys=data[n];
+    for(let y=yearFrom;y<=yearTo;y++) s+=ys[y]||0;
+    if(s>0) totals.push([n,s]);
+  }
+  totals.sort((a,b)=>b[1]-a[1]);
+  const ru=REGION_NAMES[iso]||iso;
+  const rangeTxt=yearFrom+(yearTo!==yearFrom?'–'+yearTo:'');
+  if(!totals.length){ el.innerHTML=`<div class="rt-title">${ru}</div><div class="rt-hint">Недостаточно данных за ${rangeTxt}.</div>`; return; }
+  const denom=totals.reduce((s,[,c])=>s+c,0);
+  const top=totals.slice(0,10);
+  const rows=top.map(([n,c],i)=>{
+    const pct=(100*c/denom).toFixed(1);
+    const isSel=SLUG_BY_NAME[n]&&selected.includes(n);
+    return `<div class="rt-row${isSel?' sel':''}" data-n="${n}">
+      <span class="rt-rank">${i+1}</span>
+      <span class="rt-name">${n}</span>
+      <span class="rt-pct">${pct}%</span>
+      <span class="rt-cnt">${c.toLocaleString('ru')}</span></div>`;
+  }).join('');
+  el.innerHTML=`<div class="rt-title">${ru} · ${rangeTxt}</div>
+    <div class="rt-sub">Самые частые имена (доля среди рождённых)</div>
+    ${rows}
+    <div class="rt-foot">Показаны имена, встречающиеся в регионе не реже 10 раз.</div>`;
+  // clicking a name in the list adds it to selection
+  el.querySelectorAll('.rt-row').forEach(r=>r.onclick=async ()=>{
+    const n=r.dataset.n;
+    if(!SLUG_BY_NAME[n]) return;               // name below global threshold, no per-name file
+    if(!selected.includes(n)){
+      if(selected.length>=MAX_SEL){ alert('Можно выбрать до '+MAX_SEL+' имён'); return; }
+      selected.push(n); await loadName(n); if(!mapName) mapName=n;
+    }
+    mapName=n; renderMap();
+  });
+}
+
+
 const tip=document.getElementById('tip');
 function showTip(e,text){ tip.textContent=text; tip.style.opacity=1; tip.style.left=(e.clientX+12)+'px'; tip.style.top=(e.clientY+12)+'px'; }
 function hideTip(){ tip.style.opacity=0; }
@@ -220,6 +350,12 @@ function wireControls(){
     document.getElementById('trendPanel').style.display=mode==='trend'?'':'none';
     document.getElementById('mapPanel').style.display=mode==='map'?'':'none';
     redraw();
+  });
+  const ys=document.getElementById('yscale');
+  if(ys) ys.addEventListener('click',e=>{
+    if(!e.target.dataset.s) return; yscale=e.target.dataset.s;
+    [...ys.querySelectorAll('button')].forEach(b=>b.classList.toggle('on',b.dataset.s===yscale));
+    if(mode==='trend') renderTrend();
   });
 }
 function redraw(){

@@ -29,8 +29,17 @@
       </div>
     </div>
     <div class="metrics" id="metrics"></div>
-    <div class="panel" id="trendPanel"><h2>Число носителей по году рождения</h2><div id="trendBody"></div></div>
-    <div class="panel" id="mapPanel" style="display:none"><h2>Доля имени по регионам</h2><div id="mapBody"></div></div>
+    <div class="panel" id="trendPanel">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <h2 style="margin:0">Доля имени по году рождения</h2>
+        <div class="seg" id="yscale">
+          <button data-s="lin" class="on">Линейная</button>
+          <button data-s="log">Логарифм.</button>
+        </div>
+      </div>
+      <div id="trendBody"></div>
+    </div>
+    <div class="panel" id="mapPanel" style="display:none"><h2>Доля имени по региону рождения</h2><div id="mapBody"></div></div>
     <div class="disclaimer" id="disclaimer"></div>
   </main>
 </div>
